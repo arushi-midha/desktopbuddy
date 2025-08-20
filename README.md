@@ -45,20 +45,49 @@ deskbuddy/
 
 ## Quick Start
 
-1. **Install Dependencies**:
+1. **Check Dependencies**:
+   ```bash
+   python run_deskbuddy.py --check
+   ```
+
+2. **Install Dependencies** (if needed):
    ```bash
    pip install -r requirements.txt
    ```
 
-2. **Run the Application**:
+3. **Set up Environment**:
    ```bash
-   streamlit run src/dashboard/app.py
+   python run_deskbuddy.py --setup
    ```
 
-3. **Start Data Collection**:
+4. **Start DeskBuddy** (Dashboard + Data Collection):
    ```bash
-   python src/data_collection/data_collector.py
+   python run_deskbuddy.py --start
    ```
+
+5. **Open Dashboard**: Navigate to `http://localhost:8501` in your browser
+
+## Advanced Usage
+
+- **Start Only Dashboard**:
+  ```bash
+  python run_deskbuddy.py --dashboard
+  ```
+
+- **Start Only Data Collection**:
+  ```bash
+  python run_deskbuddy.py --collect
+  ```
+
+- **Check Status**:
+  ```bash
+  python run_deskbuddy.py --status
+  ```
+
+- **View All Commands**:
+  ```bash
+  python run_deskbuddy.py
+  ```
 
 ## Current Objectives
 
