@@ -1,0 +1,66 @@
+from setuptools import setup, find_packages
+
+setup(
+    name="deskbuddy",
+    version="1.0.0",
+    description="AI-Powered Personal Productivity Companion",
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
+    author="Arushi",
+    author_email="arushi@example.com",
+    url="https://github.com/yourusername/deskbuddy",
+    packages=find_packages(),
+    classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: End Users/Desktop",
+        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Topic :: Office/Business :: Office Suites",
+        "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    ],
+    python_requires=">=3.8",
+    install_requires=[
+        "streamlit>=1.29.0",
+        "opencv-python>=4.8.1.78",
+        "mediapipe>=0.10.7",
+        "pandas>=2.1.4",
+        "numpy>=1.24.3",
+        "matplotlib>=3.7.2",
+        "seaborn>=0.12.2",
+        "plotly>=5.17.0",
+        "psutil>=5.9.6",
+        "pynput>=1.7.6",
+        "Pillow>=10.1.0",
+        "scipy>=1.11.4",
+        "scikit-learn>=1.3.2",
+        "pyautogui>=0.9.54",
+        "joblib>=1.3.0",
+    ],
+    extras_require={
+        "dev": [
+            "pytest>=7.0.0",
+            "pytest-cov>=4.0.0",
+            "black>=23.0.0",
+            "flake8>=6.0.0",
+            "mypy>=1.0.0",
+        ],
+        "windows": [
+            "pywin32>=306",
+        ],
+    },
+    entry_points={
+        "console_scripts": [
+            "deskbuddy-dashboard=src.dashboard.app:main",
+            "deskbuddy-collect=src.data_collection.data_collector:main",
+            "deskbuddy-analyze=src.models.productivity_analyzer:main",
+        ],
+    },
+    include_package_data=True,
+    package_data={
+        "deskbuddy": ["config/*.py", "data/*.db"],
+    },
+)
