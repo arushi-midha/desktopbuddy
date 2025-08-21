@@ -63,58 +63,73 @@ class DataProcessor:
             self.logger.error(f"Error generating daily summary: {e}")
             return {}
     
-    def _process_keystroke_data(self, keystroke_data: pd.DataFrame) -> Dict[str, Any]:
-        """Process keystroke activity data"""
-        try:
-            if keystroke_data.empty:
-                return {
-                    'total_keystrokes': 0,
-                    'avg_typing_speed': 0.0,
-                    'active_time_minutes': 0.0,
-                    'idle_time_minutes': 0.0,
-                    'peak_typing_hour': None,
-                    'typing_pattern': []
-                }
-            
-            # Basic statistics
-            total_keystrokes = keystroke_data['key_count'].sum()
-            avg_typing_speed = keystroke_data['typing_speed'].mean()
-            
-            # Active vs idle time calculation
-            active_records = keystroke_data[keystroke_data['is_active'] == True]
-            active_time = len(active_records) * 1.0  # 1 second per record
-            total_time = len(keystroke_data) * 1.0
-            idle_time = total_time - active_time
-            
-            # Peak typing hour
-            keystroke_data['hour'] = keystroke_data['timestamp'].dt.hour
-            hourly_keystrokes = keystroke_data.groupby('hour')['key_count'].sum()
-            peak_hour = hourly_keystrokes.idxmax() if not hourly_keystrokes.empty else None
-            
-            # Typing pattern throughout the day
-            typing_pattern = []
-            for hour in range(24):
-                hour_data = keystroke_data[keystroke_data['hour'] == hour]
-                typing_pattern.append({
-                    'hour': hour,
-                    'keystrokes': hour_data['key_count'].sum(),
-                    'avg_speed': hour_data['typing_speed'].mean() if not hour_data.empty else 0,
-                    'active_periods': len(hour_data[hour_data['is_active'] == True])
-                })
-            
-            return {
-                'total_keystrokes': int(total_keystrokes),
-                'avg_typing_speed': float(avg_typing_speed),
-                'active_time_minutes': active_time / 60,
-                'idle_time_minutes': idle_time / 60,
-                'peak_typing_hour': int(peak_hour) if peak_hour is not None else None,
-                'typing_pattern': typing_pattern,
-                'activity_percentage': (active_time / total_time * 100) if total_time > 0 else 0
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Error processing keystroke data: {e}")
+    def _process_keystroke_data(self, keystroke_data):
+        """Process keystroke data to include stress and productivity indicators"""
+        if keystroke_data.empty:
             return {}
+        
+        # Existing calculations
+        total_keystrokes = keystroke_data['key_count'].sum()
+        avg_typing_speed = keystroke_data['typing_speed'].mean()
+        active_time = keystroke_data[keystroke_data['is_active'] == True]['key_count'].sum()
+        total_time = keystroke_data['key_count'].sum()
+        activity_percentage = (active_time / total_time * 100) if total_time > 0 else 0
+        
+        # Calculate new stress and productivity indicators
+        # We'll need to compute these from the stored data
+        
+        # 1. Calculate error rate (percentage of corrections)
+        # Assuming you have a way to identify correction keys in your data
+        # If not stored directly, you might need to add this to your data collection
+        correction_keys = keystroke_data[keystroke_data['key'].isin(['Key.backspace', 'Key.delete'])]
+        total_corrections = len(correction_keys)
+        error_rate = (total_corrections / total_keystrokes * 100) if total_keystrokes > 0 else 0
+        
+        # 2. Calculate rhythm variability (standard deviation of typing intervals)
+        # This requires timestamp data for each keystroke
+        if 'timestamp' in keystroke_data.columns:
+            keystroke_data_sorted = keystroke_data.sort_values('timestamp')
+            intervals = keystroke_data_sorted['timestamp'].diff().dt.total_seconds().dropna()
+            rhythm_variability = intervals.std() if len(intervals) > 1 else 0
+        else:
+            rhythm_variability = 0
+        
+        # 3. Analyze pause patterns
+        # Calculate average pause duration and count of long pauses
+        if 'timestamp' in keystroke_data.columns:
+            keystroke_data_sorted = keystroke_data.sort_values('timestamp')
+            pauses = keystroke_data_sorted['timestamp'].diff().dt.total_seconds().dropna()
+            avg_pause = pauses.mean() if len(pauses) > 0 else 0
+            long_pauses = (pauses > 2.0).sum()  # Pauses longer than 2 seconds
+        else:
+            avg_pause = 0
+            long_pauses = 0
+        
+        # 4. Calculate stress and productivity scores
+        # Using the same formulas as in the KeystrokeLogger
+        stress_score = self._calculate_stress_score(error_rate, rhythm_variability, 
+                                                {'avg_pause': avg_pause, 'long_pauses': long_pauses}, 
+                                                avg_typing_speed)
+        
+        productivity_score = self._calculate_productivity_score(avg_typing_speed, 
+                                                            activity_percentage > 50,  # Simplified active check
+                                                            error_rate)
+        
+        keystroke_summary = {
+            'total_keystrokes': total_keystrokes,
+            'avg_typing_speed': avg_typing_speed,
+            'active_time_minutes': active_time / 5,  # Approximate conversion
+            'activity_percentage': activity_percentage,
+            # New stress and productivity indicators
+            'avg_error_rate': error_rate,
+            'rhythm_variability': rhythm_variability,
+            'avg_pause_duration': avg_pause,
+            'long_pauses_count': long_pauses,
+            'stress_score': stress_score,
+            'productivity_score': productivity_score
+        }
+        
+        return keystroke_summary
     
     def _process_window_data(self, window_data: pd.DataFrame) -> Dict[str, Any]:
         """Process window/application usage data"""
@@ -294,30 +309,36 @@ class DataProcessor:
             return []
     
     def _calculate_productivity_metrics(self, keystroke_summary: Dict, 
-                                      window_summary: Dict, 
-                                      attention_summary: Dict) -> Dict[str, Any]:
-        """Calculate comprehensive productivity metrics"""
+                                  window_summary: Dict, 
+                                  attention_summary: Dict) -> Dict[str, Any]:
+        """Calculate comprehensive productivity metrics including stress indicators"""
         try:
             # Overall productivity score (0-100)
             productivity_components = []
             weights = []
             
-            # Application usage productivity (40% weight)
+            # Application usage productivity (30% weight - reduced from 40%)
             if 'productivity_ratio' in window_summary:
                 productivity_components.append(window_summary['productivity_ratio'])
-                weights.append(0.4)
+                weights.append(0.3)
             
-            # Attention-based productivity (35% weight)
+            # Attention-based productivity (25% weight - reduced from 35%)
             if 'avg_attention_score' in attention_summary:
                 attention_productivity = attention_summary['avg_attention_score'] * 100
                 productivity_components.append(attention_productivity)
-                weights.append(0.35)
+                weights.append(0.25)
             
-            # Activity-based productivity (25% weight)
+            # Activity-based productivity (15% weight - reduced from 25%)
             if 'activity_percentage' in keystroke_summary:
                 activity_productivity = keystroke_summary['activity_percentage']
                 productivity_components.append(activity_productivity)
-                weights.append(0.25)
+                weights.append(0.15)
+            
+            # NEW: Keystroke-based productivity score (20% weight)
+            if 'productivity_score' in keystroke_summary:
+                keystroke_productivity = keystroke_summary['productivity_score'] * 100
+                productivity_components.append(keystroke_productivity)
+                weights.append(0.2)
             
             # Calculate weighted average
             if productivity_components and weights:
@@ -326,6 +347,16 @@ class DataProcessor:
                 overall_productivity = weighted_sum / total_weight
             else:
                 overall_productivity = 0.0
+            
+            # NEW: Adjust productivity based on stress level
+            stress_adjustment = 1.0  # Default no adjustment
+            if 'stress_score' in keystroke_summary:
+                # Reduce productivity by up to 30% based on stress level
+                stress_impact = keystroke_summary['stress_score'] * 0.3
+                stress_adjustment = 1.0 - stress_impact
+                adjusted_productivity = overall_productivity * stress_adjustment
+            else:
+                adjusted_productivity = overall_productivity
             
             # Focus quality score
             focus_quality = self._calculate_focus_quality(attention_summary, keystroke_summary)
@@ -338,49 +369,82 @@ class DataProcessor:
                 keystroke_summary, window_summary, attention_summary
             )
             
+            # NEW: Add stress-related metrics
+            stress_metrics = {}
+            if 'stress_score' in keystroke_summary:
+                stress_metrics['stress_score'] = keystroke_summary['stress_score'] * 100
+                stress_metrics['stress_level'] = self._categorize_stress_level(keystroke_summary['stress_score'])
+            
+            if 'avg_error_rate' in keystroke_summary:
+                stress_metrics['error_rate'] = keystroke_summary['avg_error_rate']
+            
+            if 'rhythm_variability' in keystroke_summary:
+                stress_metrics['rhythm_variability'] = keystroke_summary['rhythm_variability']
+            
+            if 'long_pauses_count' in keystroke_summary:
+                stress_metrics['long_pauses'] = keystroke_summary['long_pauses_count']
+            
             return {
                 'overall_productivity_score': overall_productivity,
+                'adjusted_productivity_score': adjusted_productivity,  # NEW: stress-adjusted
+                'stress_adjustment_factor': stress_adjustment,  # NEW: how much stress reduced productivity
                 'focus_quality_score': focus_quality,
                 'distraction_level': distraction_level,
                 'efficiency_metrics': efficiency_metrics,
+                'stress_metrics': stress_metrics,  # NEW: stress-related metrics
                 'productivity_components': {
                     'application_productivity': window_summary.get('productivity_ratio', 0),
                     'attention_productivity': attention_summary.get('avg_attention_score', 0) * 100,
-                    'activity_productivity': keystroke_summary.get('activity_percentage', 0)
+                    'activity_productivity': keystroke_summary.get('activity_percentage', 0),
+                    'keystroke_productivity': keystroke_summary.get('productivity_score', 0) * 100  # NEW
                 }
             }
             
         except Exception as e:
             self.logger.error(f"Error calculating productivity metrics: {e}")
             return {}
-    
+
+    # Add this helper method to categorize stress levels
+    def _categorize_stress_level(self, stress_score):
+        """Categorize stress level based on score"""
+        if stress_score < 0.2:
+            return "Low"
+        elif stress_score < 0.5:
+            return "Moderate"
+        elif stress_score < 0.8:
+            return "High"
+        else:
+            return "Very High"
+        
+        
     def _calculate_focus_quality(self, attention_summary: Dict, keystroke_summary: Dict) -> float:
         """Calculate focus quality score"""
         try:
             score_components = []
-            
-            # Attention consistency
+                
+                # Attention consistency
             if 'attention_variability' in attention_summary:
                 consistency_score = max(0, 100 - (attention_summary['attention_variability'] * 100))
                 score_components.append(consistency_score)
-            
-            # Number of focus sessions
+                
+                # Number of focus sessions
             if 'focus_sessions' in attention_summary:
                 focus_sessions_count = len(attention_summary['focus_sessions'])
                 sessions_score = min(100, focus_sessions_count * 20)  # 20 points per session, max 100
                 score_components.append(sessions_score)
-            
+                
             # Average attention level
             if 'avg_attention_score' in attention_summary:
                 attention_score = attention_summary['avg_attention_score'] * 100
                 score_components.append(attention_score)
-            
+                
             return sum(score_components) / len(score_components) if score_components else 0.0
             
         except Exception as e:
             self.logger.error(f"Error calculating focus quality: {e}")
             return 0.0
     
+
     def _calculate_distraction_level(self, window_summary: Dict, attention_summary: Dict) -> float:
         """Calculate distraction level (0-100, higher = more distracted)"""
         try:
@@ -589,6 +653,127 @@ class DataProcessor:
             self.logger.error(f"Error calculating trend: {e}")
             return "unknown"
 
+
+    # calculate stress and productivity indicators:
+    def _calculate_error_rate(self):
+        """Calculate the rate of error corrections (backspace/delete usage)"""
+        try:
+            if len(self.key_buffer) < 2:
+                return 0.0
+            
+            # Get keystrokes from the last 5 minutes
+            current_time = datetime.now()
+            five_minutes_ago = current_time.timestamp() - 300
+            
+            recent_keys = [k for k in self.key_buffer 
+                        if k['timestamp'].timestamp() > five_minutes_ago and k['type'] == 'press']
+            
+            recent_corrections = [c for c in self.error_corrections
+                                if c['timestamp'].timestamp() > five_minutes_ago]
+            
+            if len(recent_keys) == 0:
+                return 0.0
+            
+            # Error rate as a percentage of total keystrokes
+            return (len(recent_corrections) / len(recent_keys)) * 100
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating error rate: {e}")
+            return 0.0
+
+    def _calculate_rhythm_variability(self):
+        """Calculate the variability in typing rhythm (standard deviation of keystroke intervals)"""
+        try:
+            if len(self.pause_patterns) < 2:
+                return 0.0
+            
+            # Calculate standard deviation of pause durations
+            pauses = list(self.pause_patterns)
+            mean_pause = sum(pauses) / len(pauses)
+            variance = sum((x - mean_pause) ** 2 for x in pauses) / len(pauses)
+            return variance ** 0.5  # Standard deviation
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating rhythm variability: {e}")
+            return 0.0
+
+    def _analyze_pause_patterns(self):
+        """Analyze pause patterns for signs of stress or thinking"""
+        try:
+            if len(self.pause_patterns) < 5:
+                return {"avg_pause": 0, "long_pauses": 0}
+            
+            pauses = list(self.pause_patterns)
+            avg_pause = sum(pauses) / len(pauses)
+            
+            # Count pauses longer than 2 seconds (potential indicators of stress)
+            long_pauses = sum(1 for p in pauses if p > 2.0)
+            
+            return {
+                "avg_pause": avg_pause,
+                "long_pauses": long_pauses,
+                "max_pause": max(pauses)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing pause patterns: {e}")
+            return {"avg_pause": 0, "long_pauses": 0}
+
+    def _calculate_stress_score(self, error_rate, rhythm_variability, pause_analysis, typing_speed):
+        """Calculate a simple stress indicator based on multiple metrics"""
+        try:
+            # Normalize metrics (these thresholds should be calibrated)
+            error_score = min(error_rate / 10.0, 1.0)  # Normalize to 0-1 scale
+            rhythm_score = min(rhythm_variability / 1.0, 1.0)  # Normalize to 0-1 scale
+            pause_score = min(pause_analysis["long_pauses"] / 5.0, 1.0)  # Normalize to 0-1 scale
+            
+            # Typing speed can indicate stress (too fast or too slow)
+            if typing_speed < 20 or typing_speed > 100:
+                speed_score = 1.0  # High stress indicator
+            else:
+                speed_score = 0.2  # Low stress indicator
+            
+            # Weighted combination
+            stress_score = (0.3 * error_score + 
+                            0.3 * rhythm_score + 
+                            0.2 * pause_score + 
+                            0.2 * speed_score)
+            
+            return min(stress_score, 1.0)  # Ensure score is between 0 and 1
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating stress score: {e}")
+            return 0.0
+
+    def _calculate_productivity_score(self, typing_speed, is_active, error_rate):
+        """Calculate a simple productivity indicator based on multiple metrics"""
+        try:
+            # Base productivity on activity and consistent typing
+            activity_score = 1.0 if is_active else 0.0
+            
+            # Optimal typing speed for productivity
+            if 30 <= typing_speed <= 80:
+                speed_score = 1.0
+            elif typing_speed > 0:
+                speed_score = 1.0 / (1.0 + abs(typing_speed - 55) / 25.0)
+            else:
+                speed_score = 0.0
+            
+            # Error rate negatively impacts productivity
+            error_score = max(0.0, 1.0 - (error_rate / 20.0))
+            
+            # Weighted combination
+            productivity_score = (0.4 * activity_score + 
+                                0.4 * speed_score + 
+                                0.2 * error_score)
+            
+            return min(productivity_score, 1.0)  # Ensure score is between 0 and 1
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating productivity score: {e}")
+            return 0.0
+    
+    
 if __name__ == "__main__":
     # Test the data processor
     processor = DataProcessor()

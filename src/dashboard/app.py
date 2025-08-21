@@ -463,7 +463,7 @@ def show_daily_analysis(data_processor):
                 st.error(f"Error generating analysis: {e}")
 
 def show_productivity_metrics(summary):
-    """Show productivity metrics section"""
+    """Show productivity metrics section with stress indicators"""
     st.subheader("🎯 Productivity Metrics")
     
     metrics = summary.get('productivity_metrics', {})
@@ -475,19 +475,47 @@ def show_productivity_metrics(summary):
         st.metric("Overall Score", f"{overall_score:.1f}%")
     
     with col2:
+        adjusted_score = metrics.get('adjusted_productivity_score', 0)
+        st.metric("Adjusted Score", f"{adjusted_score:.1f}%")
+    
+    with col3:
         focus_quality = metrics.get('focus_quality_score', 0)
         st.metric("Focus Quality", f"{focus_quality:.1f}%")
     
-    with col3:
+    with col4:
         distraction_level = metrics.get('distraction_level', 0)
         st.metric("Distraction Level", f"{distraction_level:.1f}%")
     
-    with col4:
-        efficiency = metrics.get('efficiency_metrics', {}).get('typing_efficiency', 0)
-        st.metric("Typing Efficiency", f"{efficiency:.1f}")
+    # NEW: Stress metrics section
+    st.subheader("😟 Stress Indicators")
+    stress_metrics = metrics.get('stress_metrics', {})
+    
+    if stress_metrics:
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            stress_score = stress_metrics.get('stress_score', 0)
+            st.metric("Stress Score", f"{stress_score:.1f}%")
+        
+        with col2:
+            stress_level = stress_metrics.get('stress_level', 'Unknown')
+            st.metric("Stress Level", stress_level)
+        
+        with col3:
+            error_rate = stress_metrics.get('error_rate', 0)
+            st.metric("Error Rate", f"{error_rate:.2f}%")
+        
+        with col4:
+            long_pauses = stress_metrics.get('long_pauses', 0)
+            st.metric("Long Pauses", f"{long_pauses}")
+    
+    # NEW: Stress adjustment factor
+    adjustment = metrics.get('stress_adjustment_factor', 1.0)
+    if adjustment < 1.0:
+        st.info(f"Productivity reduced by {(1.0 - adjustment) * 100:.1f}% due to stress factors")
 
 def show_keystroke_summary(keystroke_summary):
-    """Show keystroke analysis summary"""
+    """Show keystroke analysis summary with new stress and productivity indicators"""
     st.subheader("⌨️ Typing Analysis")
     
     if not keystroke_summary:
@@ -499,12 +527,28 @@ def show_keystroke_summary(keystroke_summary):
     with col1:
         st.metric("Total Keystrokes", f"{keystroke_summary.get('total_keystrokes', 0):,}")
         st.metric("Average Speed", f"{keystroke_summary.get('avg_typing_speed', 0):.1f} WPM")
-    
-    with col2:
         st.metric("Active Time", f"{keystroke_summary.get('active_time_minutes', 0):.0f} min")
         st.metric("Activity %", f"{keystroke_summary.get('activity_percentage', 0):.1f}%")
     
-    # Show typing pattern
+    with col2:
+        st.metric("Error Rate", f"{keystroke_summary.get('avg_error_rate', 0):.2f}%")
+        st.metric("Rhythm Variability", f"{keystroke_summary.get('rhythm_variability', 0):.3f}")
+        st.metric("Avg Pause Duration", f"{keystroke_summary.get('avg_pause_duration', 0):.2f} sec")
+        st.metric("Long Pauses", f"{keystroke_summary.get('long_pauses_count', 0)}")
+    
+    # Add stress and productivity scores
+    col1, col2 = st.columns(2)
+    with col1:
+        stress_score = keystroke_summary.get('stress_score', 0) * 100
+        st.metric("Stress Score", f"{stress_score:.1f}%")
+        st.progress(stress_score / 100)
+    
+    with col2:
+        productivity_score = keystroke_summary.get('productivity_score', 0) * 100
+        st.metric("Productivity Score", f"{productivity_score:.1f}%")
+        st.progress(productivity_score / 100)
+    
+    # Show typing pattern (if available)
     if 'typing_pattern' in keystroke_summary:
         pattern_data = pd.DataFrame(keystroke_summary['typing_pattern'])
         if not pattern_data.empty:
