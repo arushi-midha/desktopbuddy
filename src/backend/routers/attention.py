@@ -17,6 +17,11 @@ async def get_attention_logs(
     db: DatabaseManager = Depends(get_db_manager)
 ):
     """Get attention data logs for a specific time range"""
+    if not start_date:
+        # Default to last 180 days if not specified
+        from datetime import timedelta
+        start_date = datetime.now() - timedelta(days=180)
+
     df = db.get_attention_data(start_date, end_date)
     if df.empty:
         return []

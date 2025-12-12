@@ -17,6 +17,11 @@ async def get_keystrokes(
     db: DatabaseManager = Depends(get_db_manager)
 ):
     """Get keystroke logs for a specific time range"""
+    if not start_date:
+        # Default to last 180 days if not specified
+        from datetime import timedelta
+        start_date = datetime.now() - timedelta(days=180)
+        
     df = db.get_keystroke_data(start_date, end_date)
     if df.empty:
         return []
@@ -29,6 +34,11 @@ async def get_windows(
     db: DatabaseManager = Depends(get_db_manager)
 ):
     """Get window activity logs for a specific time range"""
+    if not start_date:
+        # Default to last 180 days if not specified
+        from datetime import timedelta
+        start_date = datetime.now() - timedelta(days=180)
+
     df = db.get_window_data(start_date, end_date)
     if df.empty:
         return []
@@ -41,6 +51,11 @@ async def get_app_usage(
     db: DatabaseManager = Depends(get_db_manager)
 ):
     """Get aggregated application usage statistics"""
+    if not start_date:
+        # Default to last 180 days if not specified
+        from datetime import timedelta
+        start_date = datetime.now() - timedelta(days=180)
+
     df = db.get_app_usage_summary(start_date, end_date)
     if df.empty:
         return []
