@@ -18,7 +18,30 @@ class DatabaseManager:
         self.db_path = db_path or DATABASE_PATH
         self.logger = logging.getLogger(__name__)
         self.init_database()
+        self._migrate_schema()
     
+    def _migrate_schema(self):
+        """Check and migrate database schema for new columns"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Migrate keystroke_activity
+                cursor.execute("PRAGMA table_info(keystroke_activity)")
+                columns = [info[1] for info in cursor.fetchall()]
+                
+                if 'error_count' not in columns:
+                    self.logger.info("Migrating keystroke_activity: adding error_count")
+                    cursor.execute("ALTER TABLE keystroke_activity ADD COLUMN error_count INTEGER DEFAULT 0")
+                
+                if 'burstiness' not in columns:
+                    self.logger.info("Migrating keystroke_activity: adding burstiness")
+                    cursor.execute("ALTER TABLE keystroke_activity ADD COLUMN burstiness REAL DEFAULT 0.0")
+                    
+                conn.commit()
+        except Exception as e:
+            self.logger.error(f"Error migrating schema: {e}")
+            
     def init_database(self):
         """Initialize database with required tables"""
         try:
@@ -27,7 +50,7 @@ class DatabaseManager:
                 
                 # Create keystroke logs table
                 cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS keystroke_logs (
+                    CREATE TABLE IF NOT EXISTS keystroke_activity (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp DATETIME,
                         typing_speed REAL,
@@ -125,12 +148,14 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT INTO keystroke_activity 
-                    (timestamp, typing_speed, key_count, active_window, is_active)
-                    VALUES (?, ?, ?, ?, ?)
+                    (timestamp, typing_speed, key_count, error_count, burstiness, active_window, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     data.get('timestamp', datetime.now()),
                     data.get('typing_speed', 0.0),
                     data.get('key_count', 0),
+                    data.get('error_count', 0),
+                    data.get('burstiness', 0.0),
                     data.get('active_window', ''),
                     data.get('is_active', True)
                 ))
@@ -191,7 +216,7 @@ class DatabaseManager:
                 end_date = datetime.now()
                 
             query = '''
-                SELECT * FROM keystroke_logs 
+                SELECT * FROM keystroke_activity
                 WHERE timestamp BETWEEN ? AND ?
                 ORDER BY timestamp
             '''

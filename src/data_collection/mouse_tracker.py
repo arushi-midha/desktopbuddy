@@ -88,9 +88,13 @@ class MouseTracker:
             self._update_idle_timer(datetime.now())
 
     def _on_scroll(self, x, y, dx, dy):
-        self.scroll_count += 1
-        self.scroll_accumulation += dy
-        self._update_idle_timer(datetime.now())
+        try:
+            self.scroll_count += 1
+            self.scroll_accumulation += dy
+            self.logger.debug(f"Scroll detected: {dx}, {dy} | Count: {self.scroll_count}")
+            self._update_idle_timer(datetime.now())
+        except Exception as e:
+            self.logger.error(f"Error in on_scroll: {e}")
 
     def _update_idle_timer(self, current_time):
         """Update idle status"""
