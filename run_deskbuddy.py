@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 DeskBuddy Startup Script
 This script helps you start DeskBuddy components easily.
