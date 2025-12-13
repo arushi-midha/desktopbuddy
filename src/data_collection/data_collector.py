@@ -18,12 +18,13 @@ from config.settings import LOGGING_CONFIG
 from src.data_collection.keystroke_logger import KeystrokeLogger
 from src.data_collection.window_tracker import WindowTracker
 from src.data_collection.webcam_monitor import WebcamMonitor
+from src.data_collection.mouse_tracker import MouseTracker
 from src.data_processing.database_manager import DatabaseManager
 
 class DataCollector:
     """Unified data collection orchestrator for DeskBuddy"""
     
-    def __init__(self, enable_webcam=True, enable_keystroke=True, enable_window=True):
+    def __init__(self, enable_webcam=True, enable_keystroke=True, enable_window=True, enable_mouse=True):
         # Set up logging
         logging.config.dictConfig(LOGGING_CONFIG)
         self.logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class DataCollector:
         self.enable_webcam = enable_webcam
         self.enable_keystroke = enable_keystroke
         self.enable_window = enable_window
+        self.enable_mouse = enable_mouse
         
         # Initialize collectors
         self.collectors = {}
@@ -96,7 +98,15 @@ class DataCollector:
                     self.logger.info("Webcam monitor started")
                 except Exception as e:
                     self.logger.warning(f"Could not start webcam monitor: {e}")
+                except Exception as e:
+                    self.logger.warning(f"Could not start webcam monitor: {e}")
                     self.enable_webcam = False
+
+            if self.enable_mouse:
+                self.logger.info("Initializing mouse tracker...")
+                self.collectors['mouse'] = MouseTracker()
+                self.collectors['mouse'].start()
+                self.logger.info("Mouse tracker started")
             
             self.is_running = True
             
@@ -334,6 +344,7 @@ def main():
     parser.add_argument('--no-webcam', action='store_true', help='Disable webcam monitoring')
     parser.add_argument('--no-keystroke', action='store_true', help='Disable keystroke logging')
     parser.add_argument('--no-window', action='store_true', help='Disable window tracking')
+    parser.add_argument('--no-mouse', action='store_true', help='Disable mouse tracking')
     parser.add_argument('--stats-only', action='store_true', help='Only show statistics, no continuous collection')
     
     args = parser.parse_args()
@@ -342,7 +353,8 @@ def main():
     collector = DataCollector(
         enable_webcam=not args.no_webcam,
         enable_keystroke=not args.no_keystroke,
-        enable_window=not args.no_window
+        enable_window=not args.no_window,
+        enable_mouse=not args.no_mouse
     )
     
     if args.stats_only:

@@ -31,11 +31,13 @@ class DataProcessor:
             keystroke_data = self.db_manager.get_keystroke_data(start_date, end_date)
             window_data = self.db_manager.get_window_data(start_date, end_date)
             attention_data = self.db_manager.get_attention_data(start_date, end_date)
+            mouse_data = self.db_manager.get_mouse_data(start_date, end_date) # New
             
             # Process each data type
             keystroke_summary = self._process_keystroke_data(keystroke_data)
             window_summary = self._process_window_data(window_data)
             attention_summary = self._process_attention_data(attention_data)
+            mouse_summary = self._process_mouse_data(mouse_data) # New
             
             # Calculate productivity metrics
             productivity_metrics = self._calculate_productivity_metrics(
@@ -52,6 +54,7 @@ class DataProcessor:
                 'keystroke_summary': keystroke_summary,
                 'window_summary': window_summary,
                 'attention_summary': attention_summary,
+                'mouse_summary': mouse_summary, # New
                 'productivity_metrics': productivity_metrics,
                 'insights': insights,
                 'generated_at': datetime.now()
@@ -68,65 +71,65 @@ class DataProcessor:
         if keystroke_data.empty:
             return {}
         
-        # Existing calculations
+        # Basic Aggregates
         total_keystrokes = keystroke_data['key_count'].sum()
         avg_typing_speed = keystroke_data['typing_speed'].mean()
-        active_time = keystroke_data[keystroke_data['is_active'] == True]['key_count'].sum()
-        total_time = keystroke_data['key_count'].sum()
-        activity_percentage = (active_time / total_time * 100) if total_time > 0 else 0
         
-        # Calculate new stress and productivity indicators
-        # We'll need to compute these from the stored data
+        # Active Time Calculation
+        # Assuming each row represents a 1-second interval (or LOG_INTERVAL)
+        # We can sum up rows where is_active is True
+        active_intervals = len(keystroke_data[keystroke_data['is_active'] == True])
+        # Approximate active time in minutes (assuming 1s interval)
+        # Ideally we should multiply by the log interval constant, but 5s or 1s is close enough for estimation
+        from config.settings import KEYSTROKE_LOG_INTERVAL
+        active_time_minutes = (active_intervals * KEYSTROKE_LOG_INTERVAL) / 60
         
-        # 1. Calculate error rate (percentage of corrections)
-        # Assuming you have a way to identify correction keys in your data
-        # If not stored directly, you might need to add this to your data collection
-        correction_keys = keystroke_data[keystroke_data['key'].isin(['Key.backspace', 'Key.delete'])]
-        total_corrections = len(correction_keys)
-        error_rate = (total_corrections / total_keystrokes * 100) if total_keystrokes > 0 else 0
+        total_intervals = len(keystroke_data)
+        activity_percentage = (active_intervals / total_intervals * 100) if total_intervals > 0 else 0
         
-        # 2. Calculate rhythm variability (standard deviation of typing intervals)
-        # This requires timestamp data for each keystroke
-        if 'timestamp' in keystroke_data.columns:
-            keystroke_data_sorted = keystroke_data.sort_values('timestamp')
-            intervals = keystroke_data_sorted['timestamp'].diff().dt.total_seconds().dropna()
-            rhythm_variability = intervals.std() if len(intervals) > 1 else 0
+        # 1. Error Rate (Backspace / Delete)
+        # Now stored directly in DB
+        total_errors = keystroke_data['error_count'].sum() if 'error_count' in keystroke_data.columns else 0
+        mean_error_rate = (total_errors / total_keystrokes * 100) if total_keystrokes > 0 else 0
+        
+        # 2. Rhythm Variability (Burstiness)
+        # Average of the stored burstiness values
+        if 'burstiness' in keystroke_data.columns:
+            rhythm_variability = keystroke_data['burstiness'].mean()
         else:
-            rhythm_variability = 0
-        
-        # 3. Analyze pause patterns
-        # Calculate average pause duration and count of long pauses
-        if 'timestamp' in keystroke_data.columns:
+            rhythm_variability = 0.0
+            
+        # 3. Analyze pause patterns (simplified using active/idle time gaps)
+        # If we have timestamp, we can see gaps > 2s
+        long_pauses = 0
+        avg_pause = 0
+        if 'timestamp' in keystroke_data.columns and not keystroke_data.empty:
             keystroke_data_sorted = keystroke_data.sort_values('timestamp')
-            pauses = keystroke_data_sorted['timestamp'].diff().dt.total_seconds().dropna()
-            avg_pause = pauses.mean() if len(pauses) > 0 else 0
-            long_pauses = (pauses > 2.0).sum()  # Pauses longer than 2 seconds
-        else:
-            avg_pause = 0
-            long_pauses = 0
+            diffs = keystroke_data_sorted['timestamp'].diff().dt.total_seconds().dropna()
+            pauses = diffs[diffs > 2.0]
+            long_pauses = len(pauses)
+            avg_pause = pauses.mean() if not pauses.empty else 0
         
         # 4. Calculate stress and productivity scores
-        # Using the same formulas as in the KeystrokeLogger
-        stress_score = self._calculate_stress_score(error_rate, rhythm_variability, 
+        stress_score = self._calculate_stress_score(mean_error_rate, rhythm_variability, 
                                                 {'avg_pause': avg_pause, 'long_pauses': long_pauses}, 
                                                 avg_typing_speed)
         
         productivity_score = self._calculate_productivity_score(avg_typing_speed, 
-                                                            activity_percentage > 50,  # Simplified active check
-                                                            error_rate)
+                                                            activity_percentage > 50,
+                                                            mean_error_rate)
         
         keystroke_summary = {
-            'total_keystrokes': total_keystrokes,
-            'avg_typing_speed': avg_typing_speed,
-            'active_time_minutes': active_time / 5,  # Approximate conversion
-            'activity_percentage': activity_percentage,
-            # New stress and productivity indicators
-            'avg_error_rate': error_rate,
-            'rhythm_variability': rhythm_variability,
-            'avg_pause_duration': avg_pause,
-            'long_pauses_count': long_pauses,
-            'stress_score': stress_score,
-            'productivity_score': productivity_score
+            'total_keystrokes': int(total_keystrokes),
+            'avg_typing_speed': float(avg_typing_speed),
+            'active_time_minutes': float(active_time_minutes),
+            'activity_percentage': float(activity_percentage),
+            'avg_error_rate': float(mean_error_rate),
+            'rhythm_variability': float(rhythm_variability),
+            'avg_pause_duration': float(avg_pause),
+            'long_pauses_count': int(long_pauses),
+            'stress_score': float(stress_score),
+            'productivity_score': float(productivity_score)
         }
         
         return keystroke_summary
@@ -176,6 +179,12 @@ class DataProcessor:
             # Context switches (application changes)
             context_switches = len(window_data) - 1  # Number of transitions
             
+            # Switch Rate (switches/hour)
+            switch_rate = (context_switches / (total_time / 60)) if total_time > 0 else 0
+            
+            # Average Dwell Time (minutes)
+            avg_dwell_time = window_data['duration_seconds'].mean() / 60 if not window_data.empty else 0
+            
             # Hourly usage pattern
             window_data['hour'] = window_data['timestamp'].dt.hour
             hourly_usage = window_data.groupby('hour')['duration_seconds'].sum() / 60
@@ -190,6 +199,8 @@ class DataProcessor:
                 'productivity_apps_time': productivity_time,
                 'distraction_apps_time': distraction_time,
                 'context_switches': context_switches,
+                'switch_rate_per_hour': switch_rate,
+                'avg_dwell_time_minutes': avg_dwell_time,
                 'usage_pattern': usage_pattern,
                 'productivity_ratio': (productivity_time / total_time * 100) if total_time > 0 else 0
             }
@@ -250,6 +261,37 @@ class DataProcessor:
             
         except Exception as e:
             self.logger.error(f"Error processing attention data: {e}")
+            return {}
+            
+    def _process_mouse_data(self, mouse_data: pd.DataFrame) -> Dict[str, Any]:
+        """Process mouse activity data"""
+        try:
+            if mouse_data.empty:
+                return {}
+                
+            total_clicks = mouse_data['click_count'].sum()
+            total_scrolls = mouse_data['scroll_count'].sum()
+            total_distance = mouse_data['move_distance'].sum()
+            avg_velocity = mouse_data['avg_velocity'].mean()
+            idx_ratio = mouse_data['idle_ratio'].mean() * 100 if 'idle_ratio' in mouse_data.columns else 0
+            
+            # Doomscrolling detection: High scroll, low velocity/clicks in Browsers/Social
+            # This is a simple heuristic
+            is_doomscrolling = False
+            avg_scroll = mouse_data['scroll_count'].mean()
+            if avg_scroll > 50 and avg_velocity < 50 and total_clicks < 10:
+                is_doomscrolling = True
+                
+            return {
+                'total_clicks': int(total_clicks),
+                'total_scrolls': int(total_scrolls),
+                'total_distance_px': float(total_distance),
+                'avg_velocity_px_s': float(avg_velocity),
+                'idle_ratio_percent': float(idx_ratio),
+                'doomscrolling_detected': is_doomscrolling
+            }
+        except Exception as e:
+            self.logger.error(f"Error processing mouse data: {e}")
             return {}
     
     def _identify_focus_sessions(self, attention_data: pd.DataFrame) -> List[Dict[str, Any]]:

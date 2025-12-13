@@ -7,8 +7,22 @@ class KeystrokeLog(BaseModel):
     timestamp: datetime
     typing_speed: float
     key_count: int
+    error_count: int = 0
+    burstiness: float = 0.0
     active_window: Optional[str] = None
     is_active: bool
+
+class MouseActivity(BaseModel):
+    id: int
+    timestamp: datetime
+    active_window: Optional[str] = None
+    application_name: Optional[str] = None
+    move_distance: float
+    avg_velocity: float
+    click_count: int
+    scroll_count: int
+    scroll_direction: Optional[str] = None
+    idle_ratio: float
 
 class WindowActivity(BaseModel):
     id: int

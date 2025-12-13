@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from datetime import datetime
 from src.backend.dependencies import get_db_manager
-from src.backend.models import KeystrokeLog, WindowActivity, AppUsageStats
+from src.backend.models import KeystrokeLog, WindowActivity, AppUsageStats, MouseActivity
 from src.data_processing.database_manager import DatabaseManager
 
 router = APIRouter(

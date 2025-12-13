@@ -25,15 +25,17 @@ class DatabaseManager:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Keystroke activity table
+                # Create keystroke logs table
                 cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS keystroke_activity (
+                    CREATE TABLE IF NOT EXISTS keystroke_logs (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        timestamp DATETIME NOT NULL,
+                        timestamp DATETIME,
                         typing_speed REAL,
                         key_count INTEGER,
+                        error_count INTEGER DEFAULT 0,
+                        burstiness REAL DEFAULT 0.0,
                         active_window TEXT,
-                        is_active BOOLEAN DEFAULT 1
+                        is_active BOOLEAN
                     )
                 ''')
                 
@@ -46,6 +48,22 @@ class DatabaseManager:
                         application_name TEXT,
                         category TEXT,
                         duration_seconds REAL DEFAULT 0
+                    )
+                ''')
+                
+                # Create mouse activity table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS mouse_activity (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp DATETIME,
+                        active_window TEXT,
+                        application_name TEXT,
+                        move_distance REAL,
+                        avg_velocity REAL,
+                        click_count INTEGER,
+                        scroll_count INTEGER,
+                        scroll_direction TEXT,
+                        idle_ratio REAL
                     )
                 ''')
                 
@@ -173,18 +191,73 @@ class DatabaseManager:
                 end_date = datetime.now()
                 
             query = '''
-                SELECT * FROM keystroke_activity 
+                SELECT * FROM keystroke_logs 
                 WHERE timestamp BETWEEN ? AND ?
                 ORDER BY timestamp
             '''
             
             with sqlite3.connect(self.db_path) as conn:
                 df = pd.read_sql_query(query, conn, params=[start_date, end_date])
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                return df
                 
+                # Convert timestamp string back to datetime objects
+                if not df.empty and 'timestamp' in df.columns:
+                    df['timestamp'] = pd.to_datetime(df['timestamp'])
+                    
+            return df
+            
         except Exception as e:
             self.logger.error(f"Error retrieving keystroke data: {e}")
+            return pd.DataFrame()
+    
+    def insert_mouse_data(self, data: Dict[str, Any]):
+        """Insert mouse activity data"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO mouse_activity 
+                    (timestamp, active_window, application_name, move_distance, 
+                     avg_velocity, click_count, scroll_count, scroll_direction, idle_ratio)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    data.get('timestamp', datetime.now()),
+                    data.get('active_window', 'Unknown'),
+                    data.get('application_name', 'Unknown'),
+                    data.get('move_distance', 0.0),
+                    data.get('avg_velocity', 0.0),
+                    data.get('click_count', 0),
+                    data.get('scroll_count', 0),
+                    data.get('scroll_direction', 'NONE'),
+                    data.get('idle_ratio', 0.0)
+                ))
+                conn.commit()
+        except Exception as e:
+            self.logger.error(f"Error inserting mouse data: {e}")
+
+    def get_mouse_data(self, start_date: datetime = None, end_date: datetime = None) -> pd.DataFrame:
+        """Retrieve mouse activity data"""
+        try:
+            if not start_date:
+                start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            if not end_date:
+                end_date = datetime.now()
+                
+            query = '''
+                SELECT * FROM mouse_activity 
+                WHERE timestamp BETWEEN ? AND ?
+                ORDER BY timestamp
+            '''
+            
+            with sqlite3.connect(self.db_path) as conn:
+                df = pd.read_sql_query(query, conn, params=[start_date, end_date])
+                
+                if not df.empty and 'timestamp' in df.columns:
+                    df['timestamp'] = pd.to_datetime(df['timestamp'])
+                    
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"Error retrieving mouse data: {e}")
             return pd.DataFrame()
     
     def get_window_data(self, start_date: datetime = None, end_date: datetime = None) -> pd.DataFrame:
