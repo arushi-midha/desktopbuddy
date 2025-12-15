@@ -225,38 +225,52 @@ class DataProcessor:
             
             # Basic statistics
             total_readings = len(attention_data)
-            avg_attention = attention_data['attention_score'].mean()
-            face_detection_rate = (attention_data['face_detected'].sum() / total_readings) * 100
+            
+            # Use 'gaze_on_screen_ratio' as the primary attention score if 'attention_score' column doesn't exist
+            # But wait, we migrated the DB, so attention_data now has new columns.
+            
+            # Map new columns to summary
+            avg_gaze_on_screen = attention_data['gaze_on_screen_ratio'].mean()
+            avg_gaze_dispersion = attention_data['gaze_dispersion'].mean()
+            avg_head_pose_variance = attention_data['head_pose_variance'].mean()
             avg_blink_rate = attention_data['blink_rate'].mean()
-            screen_looking_rate = (attention_data['looking_at_screen'].sum() / total_readings) * 100
+            avg_eye_closure = attention_data['eye_closure_ratio'].mean()
+            avg_posture_stability = attention_data['posture_stability'].mean()
+            identity_switches = attention_data['face_identity_switch_rate'].mean()
             
-            # Identify focus sessions (sustained attention periods)
-            focus_sessions = self._identify_focus_sessions(attention_data)
+            face_detection_rate = (attention_data['face_detected'].sum() / total_readings) * 100
             
-            # Hourly attention pattern
+            # For backward compatibility with 'avg_attention_score' usage
+            avg_attention = avg_gaze_on_screen 
+            
+            # Hourly mean for trends
             attention_data['hour'] = attention_data['timestamp'].dt.hour
-            hourly_attention = attention_data.groupby('hour')['attention_score'].mean()
+            hourly_stats = attention_data.groupby('hour').agg({
+                'gaze_on_screen_ratio': 'mean',
+                'blink_rate': 'mean',
+                'head_pose_variance': 'mean'
+            }).to_dict('index')
+            
             attention_pattern = [
                 {
-                    'hour': hour, 
-                    'avg_attention': hourly_attention.get(hour, 0),
-                    'face_detection_rate': (
-                        attention_data[attention_data['hour'] == hour]['face_detected'].mean() * 100
-                        if hour in attention_data['hour'].values else 0
-                    )
-                } 
+                    'hour': hour,
+                    'avg_attention': hourly_stats.get(hour, {}).get('gaze_on_screen_ratio', 0),
+                    'blink_rate': hourly_stats.get(hour, {}).get('blink_rate', 0),
+                    'head_variance': hourly_stats.get(hour, {}).get('head_pose_variance', 0)
+                }
                 for hour in range(24)
             ]
             
             return {
                 'total_readings': total_readings,
-                'avg_attention_score': avg_attention,
-                'face_detection_rate': face_detection_rate,
-                'avg_blink_rate': avg_blink_rate,
-                'screen_looking_percentage': screen_looking_rate,
-                'focus_sessions': focus_sessions,
-                'attention_pattern': attention_pattern,
-                'attention_variability': attention_data['attention_score'].std()
+                'avg_attention_score': float(avg_attention), # Mapped from gaze ratio
+                'face_detection_rate': float(face_detection_rate),
+                'avg_blink_rate': float(avg_blink_rate),
+                'avg_gaze_dispersion': float(avg_gaze_dispersion),
+                'avg_eye_closure': float(avg_eye_closure),
+                'avg_posture_stability': float(avg_posture_stability),
+                'identity_switch_rate': float(identity_switches),
+                'attention_pattern': attention_pattern
             }
             
         except Exception as e:

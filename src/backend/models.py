@@ -33,15 +33,21 @@ class WindowActivity(BaseModel):
     duration_seconds: float
 
 class AttentionData(BaseModel):
-    id: int
+    id: Optional[int] = None
     timestamp: datetime
     face_detected: bool
-    attention_score: float
-    blink_rate: float
-    looking_at_screen: bool
-    head_pose_x: float
-    head_pose_y: float
-    head_pose_z: float
+    gaze_on_screen_ratio: float = 0.0
+    gaze_dispersion: float = 0.0
+    gaze_shift_rate: float = 0.0
+    blink_rate: float = 0.0
+    eye_closure_ratio: float = 0.0
+    head_pose_variance: float = 0.0
+    head_turn_rate: float = 0.0
+    face_screen_distance: float = 0.0
+    posture_stability: float = 0.0
+    secondary_device_detected_ratio: float = 0.0
+    hand_device_interaction_time: float = 0.0
+    face_identity_switch_rate: float = 0.0
 
 class DailySummary(BaseModel):
     date: datetime

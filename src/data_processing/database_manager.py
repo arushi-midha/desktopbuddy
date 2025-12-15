@@ -19,6 +19,7 @@ class DatabaseManager:
         self.logger = logging.getLogger(__name__)
         self.init_database()
         self._migrate_schema()
+        self._migrate_attention_schema()
     
     def _migrate_schema(self):
         """Check and migrate database schema for new columns"""
@@ -90,18 +91,24 @@ class DatabaseManager:
                     )
                 ''')
                 
-                # Webcam attention data table
+                # Webcam attention data table (Updated Schema)
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS attention_data (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp DATETIME NOT NULL,
-                        face_detected BOOLEAN,
-                        attention_score REAL,
+                        gaze_on_screen_ratio REAL,
+                        gaze_dispersion REAL,
+                        gaze_shift_rate REAL,
                         blink_rate REAL,
-                        looking_at_screen BOOLEAN,
-                        head_pose_x REAL,
-                        head_pose_y REAL,
-                        head_pose_z REAL
+                        eye_closure_ratio REAL,
+                        head_pose_variance REAL,
+                        head_turn_rate REAL,
+                        face_screen_distance REAL,
+                        posture_stability REAL,
+                        secondary_device_detected_ratio REAL,
+                        hand_device_interaction_time REAL,
+                        face_identity_switch_rate REAL,
+                        face_detected BOOLEAN
                     )
                 ''')
                 
@@ -184,24 +191,32 @@ class DatabaseManager:
             self.logger.error(f"Error inserting window data: {e}")
     
     def insert_attention_data(self, data: Dict[str, Any]):
-        """Insert webcam attention data"""
+        """Insert attention tracking data (New Schema)"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT INTO attention_data 
-                    (timestamp, face_detected, attention_score, blink_rate, 
-                     looking_at_screen, head_pose_x, head_pose_y, head_pose_z)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (timestamp, gaze_on_screen_ratio, gaze_dispersion, gaze_shift_rate, blink_rate, 
+                     eye_closure_ratio, head_pose_variance, head_turn_rate, face_screen_distance, 
+                     posture_stability, secondary_device_detected_ratio, hand_device_interaction_time, 
+                     face_identity_switch_rate, face_detected)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     data.get('timestamp', datetime.now()),
-                    data.get('face_detected', False),
-                    data.get('attention_score', 0.0),
+                    data.get('gaze_on_screen_ratio', 0.0),
+                    data.get('gaze_dispersion', 0.0),
+                    data.get('gaze_shift_rate', 0.0),
                     data.get('blink_rate', 0.0),
-                    data.get('looking_at_screen', False),
-                    data.get('head_pose_x', 0.0),
-                    data.get('head_pose_y', 0.0),
-                    data.get('head_pose_z', 0.0)
+                    data.get('eye_closure_ratio', 0.0),
+                    data.get('head_pose_variance', 0.0),
+                    data.get('head_turn_rate', 0.0),
+                    data.get('face_screen_distance', 0.0),
+                    data.get('posture_stability', 0.0),
+                    data.get('secondary_device_detected_ratio', 0.0),
+                    data.get('hand_device_interaction_time', 0.0),
+                    data.get('face_identity_switch_rate', 0.0),
+                    data.get('face_detected', False)
                 ))
                 conn.commit()
         except Exception as e:
@@ -234,6 +249,46 @@ class DatabaseManager:
             self.logger.error(f"Error retrieving keystroke data: {e}")
             return pd.DataFrame()
     
+    def _migrate_attention_schema(self):
+        """Migrate attention_data table to new schema if needed"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(attention_data)")
+                columns = [info[1] for info in cursor.fetchall()]
+                
+                # Check if old schema exists (looking for 'attention_score')
+                if 'attention_score' in columns:
+                    self.logger.info("Migrating attention_data: backing up old table and creating new schema")
+                    
+                    # Rename old table
+                    cursor.execute("ALTER TABLE attention_data RENAME TO attention_data_backup_v1")
+                    
+                    # Create new table
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS attention_data (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            timestamp DATETIME NOT NULL,
+                            gaze_on_screen_ratio REAL,
+                            gaze_dispersion REAL,
+                            gaze_shift_rate REAL,
+                            blink_rate REAL,
+                            eye_closure_ratio REAL,
+                            head_pose_variance REAL,
+                            head_turn_rate REAL,
+                            face_screen_distance REAL,
+                            posture_stability REAL,
+                            secondary_device_detected_ratio REAL,
+                            hand_device_interaction_time REAL,
+                            face_identity_switch_rate REAL,
+                            face_detected BOOLEAN
+                        )
+                    ''')
+                    conn.commit()
+                    
+        except Exception as e:
+            self.logger.error(f"Error migrating attention schema: {e}")
+
     def insert_mouse_data(self, data: Dict[str, Any]):
         """Insert mouse activity data"""
         try:
@@ -317,7 +372,11 @@ class DatabaseManager:
                 end_date = datetime.now()
                 
             query = '''
-                SELECT * FROM attention_data 
+                SELECT timestamp, gaze_on_screen_ratio, gaze_dispersion, gaze_shift_rate, blink_rate, 
+                       eye_closure_ratio, head_pose_variance, head_turn_rate, face_screen_distance, 
+                       posture_stability, secondary_device_detected_ratio, hand_device_interaction_time, 
+                       face_identity_switch_rate, face_detected
+                FROM attention_data 
                 WHERE timestamp BETWEEN ? AND ?
                 ORDER BY timestamp
             '''
@@ -407,7 +466,7 @@ class DatabaseManager:
                 cursor.execute('''
                     SELECT 
                         COUNT(*) as total_readings,
-                        AVG(attention_score) as avg_attention,
+                        AVG(gaze_on_screen_ratio) as avg_attention,
                         AVG(blink_rate) as avg_blink_rate,
                         SUM(CASE WHEN face_detected = 1 THEN 1 ELSE 0 END) as face_detected_count
                     FROM attention_data 
