@@ -27,6 +27,7 @@ class KeystrokeLogger:
         self.last_keystroke_time = datetime.now()
         self.typing_speeds = deque(maxlen=20)  # Store recent typing speeds
         self.current_key_count = 0
+        self.current_error_count = 0 # Track backspaces/deletes
         self.session_start_time = datetime.now()
         
         # Threading
@@ -78,6 +79,12 @@ class KeystrokeLogger:
             })
             
             self.current_key_count += 1
+            
+            # Check for error keys (Backspace/Delete)
+            key_str = str(key)
+            if 'Key.backspace' in key_str or 'Key.delete' in key_str:
+                self.current_error_count += 1
+                
             self.last_keystroke_time = current_time
             
         except Exception as e:
@@ -104,8 +111,10 @@ class KeystrokeLogger:
             try:
                 current_time = datetime.now()
                 
-                # Calculate typing speed (keys per minute)
+                # Calculate metrics
                 typing_speed = self._calculate_typing_speed()
+                burstiness = self._calculate_burstiness()
+                error_count = self.current_error_count
                 
                 # Check if user is active
                 is_active = self._is_user_active()
@@ -118,6 +127,8 @@ class KeystrokeLogger:
                     'timestamp': current_time,
                     'typing_speed': typing_speed,
                     'key_count': self.current_key_count,
+                    'error_count': error_count,
+                    'burstiness': burstiness,
                     'active_window': active_window,
                     'is_active': is_active
                 }
@@ -127,11 +138,12 @@ class KeystrokeLogger:
                 
                 # Reset counters
                 self.current_key_count = 0
+                self.current_error_count = 0 # Reset error count
                 
                 # Log metrics periodically
                 if len(self.typing_speeds) > 0:
                     avg_speed = sum(self.typing_speeds) / len(self.typing_speeds)
-                    self.logger.debug(f"Typing speed: {typing_speed:.1f} WPM, Avg: {avg_speed:.1f} WPM, Active: {is_active}")
+                    self.logger.debug(f"Speed: {typing_speed:.1f} WPM, Errors: {error_count}, Burst: {burstiness:.2f}")
                 
                 time.sleep(KEYSTROKE_LOG_INTERVAL)
                 
@@ -168,6 +180,40 @@ class KeystrokeLogger:
             
         except Exception as e:
             self.logger.error(f"Error calculating typing speed: {e}")
+            return 0.0
+
+    def _calculate_burstiness(self):
+        """Calculate typing burstiness (standard deviation of inter-key intervals)"""
+        try:
+            if len(self.key_buffer) < 3:
+                return 0.0
+                
+            current_time = datetime.now()
+            twenty_sec_ago = current_time.timestamp() - 20 # shorter window for burstiness
+            
+            # Get recent press timestamps
+            timestamps = [
+                k['timestamp'].timestamp() 
+                for k in self.key_buffer 
+                if k['timestamp'].timestamp() > twenty_sec_ago and k['type'] == 'press'
+            ]
+            
+            if len(timestamps) < 2:
+                return 0.0
+                
+            # Calculate intervals
+            intervals = [t2 - t1 for t1, t2 in zip(timestamps[:-1], timestamps[1:])]
+            
+            if not intervals:
+                return 0.0
+            
+            # Standard deviation
+            mean_interval = sum(intervals) / len(intervals)
+            variance = sum((x - mean_interval) ** 2 for x in intervals) / len(intervals)
+            return variance ** 0.5
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating burstiness: {e}")
             return 0.0
     
     def _is_user_active(self):

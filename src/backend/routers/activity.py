@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from datetime import datetime
 from src.backend.dependencies import get_db_manager
-from src.backend.models import KeystrokeLog, WindowActivity, AppUsageStats
+from src.backend.models import KeystrokeLog, WindowActivity, AppUsageStats, MouseActivity
 from src.data_processing.database_manager import DatabaseManager
 
 router = APIRouter(
@@ -57,6 +57,22 @@ async def get_app_usage(
         start_date = datetime.now() - timedelta(days=180)
 
     df = db.get_app_usage_summary(start_date, end_date)
+    if df.empty:
+        return []
+    return df.to_dict('records')
+
+@router.get("/mouse", response_model=List[MouseActivity])
+async def get_mouse_activity(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    db: DatabaseManager = Depends(get_db_manager)
+):
+    """Get mouse activity logs for a specific time range"""
+    if not start_date:
+        from datetime import timedelta
+        start_date = datetime.now() - timedelta(days=180)
+        
+    df = db.get_mouse_data(start_date, end_date)
     if df.empty:
         return []
     return df.to_dict('records')

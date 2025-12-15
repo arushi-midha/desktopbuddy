@@ -39,14 +39,14 @@ APP_CATEGORIES = {
     'productivity': [
         'notepad', 'code', 'visual studio', 'pycharm', 'intellij',
         'sublime', 'atom', 'vim', 'emacs', 'word', 'excel', 'powerpoint',
-        'google docs', 'notion', 'obsidian', 'typora'
+        'google docs', 'notion', 'obsidian', 'typora', 'antigravity'
     ],
     'communication': [
         'slack', 'teams', 'discord', 'zoom', 'skype', 'whatsapp',
         'telegram', 'outlook', 'gmail', 'mail'
     ],
     'browsing': [
-        'chrome', 'firefox', 'safari', 'edge', 'browser'
+        'chrome', 'firefox', 'safari', 'edge', 'browser', 'brave', 'comet'
     ],
     'entertainment': [
         'youtube', 'netflix', 'spotify', 'vlc', 'media player',

@@ -39,22 +39,20 @@ def check_dependencies():
     print("✅ All required packages are installed")
     return True
 
-def start_dashboard():
-    """Start the Streamlit dashboard"""
-    print("🚀 Starting DeskBuddy Dashboard...")
-    dashboard_path = project_root / "src" / "dashboard" / "app.py"
+def start_backend():
+    """Start the FastAPI backend server"""
+    print("🚀 Starting DeskBuddy Backend...")
     
     try:
         subprocess.run([
-            sys.executable, "-m", "streamlit", "run", 
-            str(dashboard_path), 
-            "--server.port", "8501",
-            "--server.headless", "false"
+            sys.executable, "-m", "uvicorn", 
+            "src.backend.main:app", 
+            "--reload"
         ], cwd=project_root)
     except KeyboardInterrupt:
-        print("\n👋 Dashboard stopped")
+        print("\n👋 Backend stopped")
     except Exception as e:
-        print(f"❌ Error starting dashboard: {e}")
+        print(f"❌ Error starting backend: {e}")
 
 def start_data_collection():
     """Start data collection in background"""
@@ -82,7 +80,7 @@ def start_both():
     time.sleep(2)
     
     # Start dashboard in main thread
-    start_dashboard()
+    start_backend()
 
 def show_status():
     """Show current status of DeskBuddy components"""
@@ -175,7 +173,7 @@ def main():
         show_status()
     elif args.dashboard:
         if check_dependencies():
-            start_dashboard()
+            start_backend()
     elif args.collect:
         if check_dependencies():
             start_data_collection()

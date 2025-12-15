@@ -38,8 +38,15 @@ class WebcamMonitor:
         # Tracking variables
         self.attention_scores = deque(maxlen=50)
         self.blink_history = deque(maxlen=100)
-        self.face_positions = deque(maxlen=30)
+        self.face_positions = deque(maxlen=30) # For posture stability
+        self.head_pose_history = deque(maxlen=30) # For head pose variance
+        self.gaze_history = deque(maxlen=30) # For gaze dispersion
+        self.eye_closure_history = deque(maxlen=30) # For eye closure ratio
+        
         self.last_blink_time = datetime.now()
+        self.last_face_time = datetime.now()
+        self.face_switches = 0
+        self.face_switch_start_time = datetime.now()
         self.consecutive_no_face = 0
         
         # Threading
@@ -48,6 +55,10 @@ class WebcamMonitor:
         # Eye aspect ratio thresholds for blink detection
         self.EAR_THRESHOLD = 0.25
         self.CONSECUTIVE_FRAMES_THRESHOLD = 3
+        
+        # Heuristics / Calibrations
+        self.SCREEN_DISTANCE_REF = 500  # arbitrary reference unit
+        self.GAZE_HISTORY_WINDOW = 30  # Frames
         
     def start(self):
         """Start webcam monitoring"""
@@ -148,12 +159,18 @@ class WebcamMonitor:
                 return {
                     'timestamp': current_time,
                     'face_detected': False,
-                    'attention_score': 0.0,
+                    'gaze_on_screen_ratio': 0.0,
+                    'gaze_dispersion': 0.0,
+                    'gaze_shift_rate': 0.0,
                     'blink_rate': 0.0,
-                    'looking_at_screen': False,
-                    'head_pose_x': 0.0,
-                    'head_pose_y': 0.0,
-                    'head_pose_z': 0.0
+                    'eye_closure_ratio': 0.0,
+                    'head_pose_variance': 0.0,
+                    'head_turn_rate': 0.0,
+                    'face_screen_distance': 0.0,
+                    'posture_stability': 0.0,
+                    'secondary_device_detected_ratio': 0.0,
+                    'hand_device_interaction_time': 0.0,
+                    'face_identity_switch_rate': 0.0
                 }
             
             self.consecutive_no_face = 0
@@ -165,20 +182,49 @@ class WebcamMonitor:
                 landmarks = mesh_results.multi_face_landmarks[0]
                 
                 # Calculate attention metrics
-                attention_score = self._calculate_attention_score(landmarks, rgb_frame.shape)
-                blink_rate = self._detect_blinks(landmarks)
-                looking_at_screen = self._is_looking_at_screen(landmarks)
                 head_pose = self._estimate_head_pose(landmarks, rgb_frame.shape)
+                
+                # New Metrics Calculations
+                gaze_metrics = self._calculate_gaze_metrics(landmarks, rgb_frame.shape)
+                pose_metrics = self._estimate_head_pose_metrics(head_pose)
+                face_stats = self._calculate_face_stats(landmarks, rgb_frame.shape)
+                
+                # Eye metrics
+                left_ear = self._calculate_ear(landmarks, [33, 7, 163, 144, 145, 153], (480, 640))
+                right_ear = self._calculate_ear(landmarks, [362, 382, 381, 380, 374, 373], (480, 640))
+                avg_ear = (left_ear + right_ear) / 2.0
+                
+                blink_rate = self._detect_blinks(landmarks)
+                closure_ratio = self._calculate_eye_closure_metrics(avg_ear)
+                
+                # Composite Attention Score (0.0 - 1.0)
+                # Weighted sum of on_screen (0.5), stability (0.3), and head pose (0.2)
+                # Normalize stability/variance (lower is better)
+                stability_score = max(0.0, 1.0 - face_stats['stability'] * 5) # Scale factor hypothesis
+                pose_score = max(0.0, 1.0 - pose_metrics['variance'] / 100) # Scale factor hypothesis
+                
+                attention_score = (
+                    gaze_metrics['on_screen'] * 0.5 +
+                    stability_score * 0.3 +
+                    pose_score * 0.2
+                )
+                self.attention_scores.append(attention_score)
                 
                 return {
                     'timestamp': current_time,
                     'face_detected': True,
-                    'attention_score': attention_score,
+                    'gaze_on_screen_ratio': gaze_metrics['on_screen'],
+                    'gaze_dispersion': gaze_metrics['dispersion'],
+                    'gaze_shift_rate': gaze_metrics['shift_rate'],
                     'blink_rate': blink_rate,
-                    'looking_at_screen': looking_at_screen,
-                    'head_pose_x': head_pose[0],
-                    'head_pose_y': head_pose[1],
-                    'head_pose_z': head_pose[2]
+                    'eye_closure_ratio': closure_ratio,
+                    'head_pose_variance': pose_metrics['variance'],
+                    'head_turn_rate': pose_metrics['turn_rate'],
+                    'face_screen_distance': face_stats['distance'],
+                    'posture_stability': face_stats['stability'],
+                    'secondary_device_detected_ratio': 0.0, # Placeholder
+                    'hand_device_interaction_time': 0.0, # Placeholder
+                    'face_identity_switch_rate': face_stats['switch_rate']
                 }
             
             return None
@@ -287,28 +333,97 @@ class WebcamMonitor:
         except Exception as e:
             self.logger.error(f"Error detecting blinks: {e}")
             return 0.0
-    
-    def _is_looking_at_screen(self, landmarks):
-        """Determine if user is looking at the screen"""
+
+    def _calculate_eye_closure_metrics(self, avg_ear):
+        """Calculate eye closure ratio over time"""
         try:
-            # Estimate gaze direction based on head pose and eye position
-            head_pose = self._estimate_head_pose(landmarks, (480, 640))
+            is_closed = 1.0 if avg_ear < self.EAR_THRESHOLD else 0.0
+            self.eye_closure_history.append(is_closed)
             
-            # Consider looking at screen if head is roughly facing forward
-            yaw, pitch, roll = head_pose
+            if len(self.eye_closure_history) > 0:
+                closure_ratio = sum(self.eye_closure_history) / len(self.eye_closure_history)
+                return closure_ratio
+            return 0.0
+        except Exception:
+            return 0.0
+    
+    def _calculate_gaze_metrics(self, landmarks, frame_shape):
+        """Calculate gaze related metrics using Iris landmarks"""
+        try:
+            h, w = frame_shape[:2]
             
-            # Thresholds for "looking at screen"
-            looking_at_screen = (
-                abs(yaw) < 25 and    # Not turned too far left/right
-                abs(pitch) < 15 and  # Not looking too far up/down
-                abs(roll) < 20       # Not tilted too much
-            )
+            # Iris landmarks (Left: 468, Right: 473)
+            left_iris = landmarks.landmark[468]
+            right_iris = landmarks.landmark[473]
             
-            return looking_at_screen
+            # Average iris position (normalized)
+            gaze_x = (left_iris.x + right_iris.x) / 2
+            gaze_y = (left_iris.y + right_iris.y) / 2
+            
+            self.gaze_history.append((gaze_x, gaze_y))
+            
+            # 1. Gaze on screen ratio (heuristic)
+            # Assuming "screen" is within central 50% of frame width/height for now
+            on_screen = 0.25 < gaze_x < 0.75 and 0.25 < gaze_y < 0.75
+            
+            # 2. Gaze Dispersion (Standard deviation of gaze points)
+            if len(self.gaze_history) > 5:
+                # Calculate Euclidean dispersion
+                points = np.array(self.gaze_history)
+                gaze_dispersion = np.mean(np.std(points, axis=0)) # simplified dispersion
+            else:
+                gaze_dispersion = 0.0
+                
+            # 3. Gaze Shift Rate (Large movements per second)
+            gaze_shift_rate = 0.0
+            if len(self.gaze_history) > 1:
+                recent_moves = 0
+                for i in range(1, len(self.gaze_history)):
+                    p1 = np.array(self.gaze_history[i-1])
+                    p2 = np.array(self.gaze_history[i])
+                    dist = np.linalg.norm(p2 - p1)
+                    if dist > 0.05: # Threshold for significant shift
+                        recent_moves += 1
+                
+                # Approximate moves per minute equivalent
+                gaze_shift_rate = (recent_moves / len(self.gaze_history)) * 60
+            
+            return {
+                'on_screen': float(on_screen), # 1.0 or 0.0 for this frame
+                'dispersion': float(gaze_dispersion),
+                'shift_rate': float(gaze_shift_rate)
+            }
             
         except Exception as e:
-            self.logger.error(f"Error determining screen gaze: {e}")
-            return False
+            self.logger.error(f"Error calculating gaze metrics: {e}")
+            return {'on_screen': 0.0, 'dispersion': 0.0, 'shift_rate': 0.0}
+
+    def _estimate_head_pose_metrics(self, head_pose):
+        """Calculate head pose variance and turn rate"""
+        try:
+            self.head_pose_history.append(head_pose)
+            
+            if len(self.head_pose_history) < 2:
+                return {'variance': 0.0, 'turn_rate': 0.0}
+            
+            # 1. Variance
+            poses = np.array(self.head_pose_history)
+            variance = np.mean(np.var(poses, axis=0))
+            
+            # 2. Turn Rate (degrees per second approx)
+            total_angular_change = 0
+            for i in range(1, len(self.head_pose_history)):
+                p1 = np.array(self.head_pose_history[i-1])
+                p2 = np.array(self.head_pose_history[i])
+                total_angular_change += np.linalg.norm(p2 - p1)
+            
+            turn_rate = total_angular_change / (len(self.head_pose_history) * WEBCAM_CAPTURE_INTERVAL)
+            
+            return {'variance': float(variance), 'turn_rate': float(turn_rate)}
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating pose metrics: {e}")
+            return {'variance': 0.0, 'turn_rate': 0.0}
     
     def _estimate_head_pose(self, landmarks, frame_shape):
         """Estimate head pose (yaw, pitch, roll) in degrees"""
@@ -377,9 +492,66 @@ class WebcamMonitor:
             
             return (0.0, 0.0, 0.0)
             
+            return (0.0, 0.0, 0.0)
+            
         except Exception as e:
             self.logger.error(f"Error estimating head pose: {e}")
             return (0.0, 0.0, 0.0)
+    
+    def _calculate_face_stats(self, landmarks, frame_shape):
+        """Calculate face distance, posture stability, and identity switches"""
+        try:
+            h, w = frame_shape[:2]
+            current_time = datetime.now()
+            
+            # 1. Face Screen Distance (Inverse of IPD)
+            # Left Eye: 33, Right Eye: 263
+            left_eye = landmarks.landmark[33]
+            right_eye = landmarks.landmark[263]
+            
+            # Calculate geometric distance (IPD in normalized coordinates)
+            ipd = np.sqrt((left_eye.x - right_eye.x)**2 + (left_eye.y - right_eye.y)**2)
+            
+            # Start with a heuristic: if IPD is large, face is close. 
+            # Approximate distance (cm) = Constant / IPD
+            # Assuming standard IPD of 63mm.
+            estimated_distance = self.SCREEN_DISTANCE_REF / (ipd * w) # Heuristic
+            
+            # 2. Posture Stability (Movement of nose tip)
+            nose_tip = landmarks.landmark[1]
+            nose_pos = (nose_tip.x, nose_tip.y)
+            self.face_positions.append(nose_pos)
+            
+            posture_stability = 0.0
+            if len(self.face_positions) > 5:
+                # Variance of position
+                pos_array = np.array(self.face_positions)
+                posture_stability = np.mean(np.std(pos_array, axis=0))
+                
+            # 3. Identity Switch Rate (Heuristic based on face loss)
+            # If we lost face for > 1 sec and got it back, count as switch
+            time_since_last_face = (current_time - self.last_face_time).total_seconds()
+            
+            if self.consecutive_no_face > 0 and time_since_last_face > 1.0:
+                 self.face_switches += 1
+            
+            self.last_face_time = current_time
+            
+            # Calculate rate (switches per hour)
+            uptime_hours = (current_time - self.face_switch_start_time).total_seconds() / 3600
+            switch_rate = self.face_switches / uptime_hours if uptime_hours > 0.01 else 0.0
+            
+            return {
+                'distance': float(estimated_distance),
+                'stability': float(posture_stability),
+                'switch_rate': float(switch_rate),
+                'hand_interaction': 0.0, # Placeholder
+                'secondary_device': 0.0 # Placeholder
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating face stats: {e}")
+            return {'distance': 0.0, 'stability': 0.0, 'switch_rate': 0.0, 'hand_interaction': 0.0, 'secondary_device': 0.0}
     
     def _record_attention_data(self, analysis_result):
         """Record attention analysis results to database"""
@@ -418,7 +590,10 @@ class WebcamMonitor:
                 'blink_rate': len(recent_blinks),
                 'face_detected': self.consecutive_no_face < 5,
                 'looking_at_screen': current_attention > 0.3,
-                'attention_trend': list(self.attention_scores)[-10:]  # Last 10 readings
+                'attention_trend': list(self.attention_scores)[-10:],
+                # New Metrics for Live View
+                'gaze_on_screen': self.gaze_history[-1][0] if self.gaze_history else 0, # Just X coord for now
+                'posture_stability': 1.0 - (current_attention * 0.1) # Placeholder proxy
             }
             
         except Exception as e:
