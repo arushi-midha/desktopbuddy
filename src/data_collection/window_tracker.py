@@ -70,16 +70,15 @@ class WindowTracker:
                 # Get current active window
                 window_info = self._get_active_window_info()
                 
-                if window_info and window_info != self.current_window:
-                    # Record previous window session
-                    if self.current_window and self.window_start_time:
-                        self._record_window_session()
-                    
-                    # Start new window session
+                # Update current window info
+                if window_info:
                     self.current_window = window_info
-                    self.window_start_time = datetime.now()
                     
-                    self.logger.debug(f"Switched to: {window_info['application_name']} - {window_info['window_title']}")
+                # Record snapshot every interval regardless of change
+                # This ensures synchronized time series for ML
+                self._record_window_snapshot(WINDOW_TRACK_INTERVAL)
+                
+                self.logger.debug(f"Tracked: {self.current_window.get('application_name', 'Unknown')}")
                 
                 time.sleep(WINDOW_TRACK_INTERVAL)
                 
@@ -189,46 +188,39 @@ class WindowTracker:
             self.logger.error(f"Error categorizing application: {e}")
             return 'other'
     
-    def _record_window_session(self):
-        """Record the completed window session to database"""
+    def _record_window_snapshot(self, duration):
+        """Record window activity snapshot for the current interval"""
         try:
-            if not self.current_window or not self.window_start_time:
+            if not self.current_window:
                 return
             
-            end_time = datetime.now()
-            duration = (end_time - self.window_start_time).total_seconds()
+            timestamp = datetime.now()
             
-            # Only record sessions longer than 1 second
-            if duration >= 1.0:
-                window_data = {
-                    'timestamp': self.window_start_time,
-                    'window_title': self.current_window['window_title'],
-                    'application_name': self.current_window['application_name'],
-                    'category': self.current_window['category'],
-                    'duration_seconds': duration
-                }
-                
-                # Store in database
-                self.db_manager.insert_window_data(window_data)
-                
-                # Update local usage tracking
-                app_name = self.current_window['application_name']
-                self.app_usage_time[app_name] += duration
-                
-                # Add to history
-                self.window_history.append({
-                    **window_data,
-                    'end_time': end_time
-                })
-                
-                # Keep only recent history (last 100 entries)
-                if len(self.window_history) > 100:
-                    self.window_history = self.window_history[-100:]
-                
-                self.logger.debug(f"Recorded session: {app_name} for {duration:.1f}s")
+            # Record snapshot
+            window_data = {
+                'timestamp': timestamp,
+                'window_title': self.current_window['window_title'],
+                'application_name': self.current_window['application_name'],
+                'category': self.current_window['category'],
+                'duration_seconds': duration
+            }
+            
+            # Store in database
+            self.db_manager.insert_window_data(window_data)
+            
+            # Update local usage tracking
+            app_name = self.current_window['application_name']
+            self.app_usage_time[app_name] += duration
+            
+            # Add to history
+            self.window_history.append(window_data)
+            
+            # Keep only recent history
+            if len(self.window_history) > 100:
+                self.window_history = self.window_history[-100:]
             
         except Exception as e:
-            self.logger.error(f"Error recording window session: {e}")
+            self.logger.error(f"Error recording window snapshot: {e}")
     
     def get_current_session_stats(self):
         """Get statistics for the current session"""
